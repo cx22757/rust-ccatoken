@@ -617,6 +617,55 @@ mod tests {
     use super::*;
     use crate::store::{MemoRefValueStore, MemoTrustAnchorStore};
 
+    fn hexify(bytes: impl AsRef<[u8]>) -> String {
+        hex::encode(bytes.as_ref())
+    }
+
+    fn print_platform_claims(p: &Platform) {
+        println!("== Platform claims ==");
+        println!("profile: {}", p.profile);
+        println!("challenge: {}", hexify(&p.challenge));
+        println!("impl_id: {}", hexify(p.impl_id));
+        println!("inst_id: {}", hexify(p.inst_id));
+        println!("config: {}", hexify(&p.config));
+        println!("lifecycle: {:#06x}", p.lifecycle);
+        println!(
+            "verification_service: {}",
+            p.verification_service.as_deref().unwrap_or("<none>")
+        );
+        println!("hash_alg: {}", p.hash_alg);
+        println!("sw_components ({}):", p.sw_components.len());
+        for (i, c) in p.sw_components.iter().enumerate() {
+            println!(
+                "  #{i} type={} version={} hash_alg={} mval={} signer_id={}",
+                c.mtyp.as_deref().unwrap_or("<none>"),
+                c.version.as_deref().unwrap_or("<none>"),
+                c.hash_alg.as_deref().unwrap_or("<none>"),
+                hexify(&c.mval),
+                hexify(&c.signer_id),
+            );
+        }
+    }
+
+    fn print_realm_claims(r: &Realm) {
+        println!("== Realm claims ==");
+        println!("profile: {}", if r.profile.is_empty() { "<legacy>" } else { &r.profile });
+        println!("challenge: {}", hexify(r.challenge));
+        println!("perso: {}", hexify(r.perso));
+        println!("rim: {}", hexify(&r.rim));
+        println!("rem ({}):", r.rem.len());
+        for (i, rem) in r.rem.iter().enumerate() {
+            println!("  #{i}: {}", hexify(rem));
+        }
+        println!("hash_alg: {}", r.hash_alg);
+        println!("rak_hash_alg: {}", r.rak_hash_alg);
+        if !r.cose_rak.is_empty() {
+            println!("rak(cose_key): {} bytes", r.cose_rak.len());
+        } else {
+            println!("rak(raw): {}", hexify(r.raw_rak));
+        }
+    }
+
     const TEST_CCA_TOKEN_1_OK: &[u8; 1222] = include_bytes!("../../testdata/cca-token-01.cbor");
     const TEST_CCA_TOKEN_2_OK: &[u8; 1125] = include_bytes!("../../testdata/cca-token-02.cbor");
     const TEST_CCA_TOKEN_BUG_33: &[u8; 2507] = include_bytes!("../../testdata/bug-33-repro.cbor");
@@ -632,6 +681,14 @@ mod tests {
         let r = Evidence::decode(TEST_CCA_TOKEN_1_OK.as_slice());
 
         assert!(r.is_ok());
+    }
+
+    #[test]
+    fn decode_and_print_cca_token_01() {
+        let e = Evidence::decode(TEST_CCA_TOKEN_1_OK.as_slice()).expect("decoding cca-token-01");
+
+        print_platform_claims(&e.platform_claims);
+        print_realm_claims(&e.realm_claims);
     }
 
     #[test]

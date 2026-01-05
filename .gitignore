@@ -18,3 +18,7 @@ Cargo.lock
 
 # Mac OS Finder stuff
 **/.DS_Store
+
+.gitignore
+
+.idea
