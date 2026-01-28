@@ -37,12 +37,14 @@ pub extern "C" fn get_attestation_token(
         return 1;
     }
 
-    // 读取 challenge
-    let challenge_data = if challenge_len > 0 {
-        unsafe { slice::from_raw_parts(challenge, challenge_len) }
-    } else {
-        &[0u8; 64] // 默认 challenge
-    };
+    if challenge_len > 64 {
+        return 1;
+    }
+
+    let mut challenge_data = [0u8; 64];
+    let input_slice = unsafe { slice::from_raw_parts(challenge, challenge_len) };
+    // 拷贝数据到 challenge_data 的起始位置，剩余位保持为 0
+    challenge_data[..challenge_len].copy_from_slice(&input_slice[..challenge_len]);
 
     // 生成 token
     let generator = match TokenGenerator::new() {
@@ -50,7 +52,7 @@ pub extern "C" fn get_attestation_token(
         Err(_) => return 1,
     };
 
-    let token_data = match generator.generate_token(challenge_data) {
+    let token_data = match generator.generate_token(&challenge_data) {
         Ok(t) => t,
         Err(_) => return 1,
     };
