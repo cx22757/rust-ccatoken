@@ -1,19 +1,17 @@
 // src/token.rs
 
 use crate::constants::*;
+use ciborium::Value;
+use coset::{
+    iana, Algorithm, CborSerializable, CoseKey, CoseSign1, KeyOperation,
+    KeyType, Label, TaggedCborSerializable,
+};
+use openssl::bn::BigNumContext;
 use openssl::ec::{EcGroup, EcKey};
+use openssl::hash::{hash, MessageDigest};
 use openssl::nid::Nid;
 use openssl::pkey::{PKey, Private};
 use openssl::sign::Signer;
-use openssl::hash::{hash, MessageDigest};
-use openssl::bn::BigNumContext;
-use ciborium::Value;
-use ciborium::value::Integer;
-// 引入 coset 核心 trait 和结构
-use coset::{
-    CoseSign1, CoseKey, KeyType, KeyOperation, Algorithm, Label,
-    CborSerializable, TaggedCborSerializable, iana,
-};
 
 pub struct TokenGenerator {
     platform_key: PKey<Private>,
@@ -37,15 +35,24 @@ impl TokenGenerator {
         let rak_ec_key = EcKey::generate(&group)?;
         let rak_pkey = PKey::from_ec_key(rak_ec_key.clone())?;
 
-        // 3. 构建 RAK 的 COSE_Key 结构
-        // CCA 要求 RAK 在 Claims 中以 COSE_Key Map 形式存在
-        let rak_cose_key = self.create_cose_key(&rak_ec_key)?;
+        // 3. 提取 RAK 公钥
+        let mut bn_ctx = BigNumContext::new()?;
+        let rak_pub_uncompressed = rak_ec_key.public_key().to_bytes(
+            &group,
+            openssl::ec::PointConversionForm::UNCOMPRESSED,
+            &mut bn_ctx,
+        )?;
 
-        // 序列化 COSE_Key 以便计算哈希和存入 Claims
-        let rak_cose_bytes = rak_cose_key.to_vec()?;
+        // P-521 未压缩格式: 0x04 || x (66 bytes) || y (66 bytes) = 133 bytes
+        // 去掉第一个字节 0x04，提取 x 和 y
+        let rak_pub_bytes = if rak_pub_uncompressed.len() == 133 && rak_pub_uncompressed[0] == 0x04 {
+            rak_pub_uncompressed.to_vec()
+        } else {
+            return Err("Invalid P-521 public key format".into());
+        };
 
-        // 4. 计算 RAK 的 SHA-512 哈希 (用于绑定到 Platform Token)
-        let rak_hash = hash(MessageDigest::sha512(), &rak_cose_bytes)?;
+        // 4. 计算 RAK 的 SHA-256 哈希 (用于绑定到 Platform Token)
+        let rak_hash = hash(MessageDigest::sha256(), &rak_pub_bytes)?;
 
         // 5. 修改 token 结构
         // 这一步假设根是一个 Tag 399 包裹的 Map
@@ -57,8 +64,7 @@ impl TokenGenerator {
 
                 // --- 修改 Realm Token (注入 Challenge 和 RAK Key) ---
                 // 这里我们传入 Ciborium Value 格式的 RAK Map，以便插入 Payload
-                let rak_value: Value = ciborium::from_reader(&rak_cose_bytes[..])?;
-                self.update_realm_token(root_map, challenge, rak_value)?;
+                self.update_realm_token(root_map, challenge, rak_pub_bytes.as_slice())?;
 
                 // --- 对 Realm Token 进行签名 (使用 RAK 私钥) ---
                 self.sign_token(root_map, REALM_LABEL, &rak_pkey)?;
@@ -147,7 +153,7 @@ impl TokenGenerator {
         &self,
         root_map: &mut Vec<(Value, Value)>,
         challenge: &[u8],
-        rak_value: Value,
+        rak: &[u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let label_val = i128::into(REALM_LABEL);
 
@@ -167,8 +173,8 @@ impl TokenGenerator {
                                 // 替换challenge
                                 *cv = Value::Bytes(challenge.to_vec());
                             } else if *ck == i128::into(REALM_RAK_LABEL) {
-                                // 替换为新的 RAK (COSE_Key Map)
-                                *cv = rak_value.clone();
+                                // 替换rak
+                                *cv = Value::Bytes(rak.to_vec());
                             }
                         }
                     }
@@ -182,6 +188,7 @@ impl TokenGenerator {
                 // 4. 保存
                 *bytes = sign1.to_tagged_vec()
                     .map_err(|e| format!("Failed to serialize Realm CoseSign1: {}", e))?;
+                *v = Value::Bytes(bytes.to_vec());
             }
         }
         Ok(())
