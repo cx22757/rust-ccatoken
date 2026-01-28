@@ -10,7 +10,6 @@ crate-type = ["cdylib"]
 openssl = "0.10"
 ciborium = "0.2"
 hex = "0.4"
-coset = "0.4.1"
 [profile.release]
 opt-level = 3
 lto = true

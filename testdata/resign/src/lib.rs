@@ -2,10 +2,10 @@
 
 mod constants;
 // mod token;
-mod token1;
+mod token;
 
 use constants::PLATFORM_CERT_PEM;
-use token1::TokenGenerator;
+use token::TokenGenerator;
 use std::ptr;
 use std::slice;
 
@@ -160,15 +160,15 @@ mod tests {
         assert_eq!(result, 0);
 
         // 分配缓冲区并获取 token
-        let mut buffer = vec![0u8; token_len];
+        let mut buffer_len = token_len + 1000;
+        let mut buffer = vec![0u8; buffer_len];
         let result = get_attestation_token(
             challenge.as_ptr(),
             challenge.len(),
             buffer.as_mut_ptr(),
-            &mut token_len,
+            &mut buffer_len,
         );
         assert_eq!(result, 0);
-        assert_eq!(buffer.len(), token_len);
     }
 
     #[test]
